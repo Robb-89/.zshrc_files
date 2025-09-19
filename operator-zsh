@@ -1,0 +1,120 @@
+# Path to your oh-my-zsh installation
+export ZSH="$HOME/.oh-my-zsh"
+export PATH=$PATH:$(go env GOPATH)/bin
+# Set Zsh theme (you can change this to others like 'agnoster', 'powerlevel10k', etc.)
+ZSH_THEME="agnoster"
+
+# Enable Oh My Zsh plugins
+plugins=(
+  git
+  sudo
+  zsh-autosuggestions
+  zsh-syntax-highlighting
+)
+
+source $ZSH/oh-my-zsh.sh
+
+# --- Path Setup ---
+export PATH="$HOME/bin:$PATH"
+export PATH="$HOME/hacking:$PATH"
+
+# --- History Configuration ---
+HISTSIZE=5000
+SAVEHIST=5000
+HISTFILE=~/.zsh_history
+setopt appendhistory
+
+# --- Aliases: General ---
+alias ll='ls -la --color=auto'
+alias la='ls -A'
+alias l='ls -CF'
+alias cls='clear'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias please='sudo $(history -p !!)'
+alias update='sudo apt update && sudo apt full-upgrade -y'
+
+# --- Networking / Enumeration ---
+alias ports='netstat -tulanp'
+alias ipinfo='ip -c a'
+alias myip='curl ifconfig.me'
+alias grabip='ip route get 1 2>/dev/null | awk '\''{print $7}'\'' | head -n1'
+
+# --- Hacking Shortcuts ---
+alias webscan='gobuster dir -u'
+alias subscan='gobuster dns -d'
+alias nmapscan='nmap -A -T4'
+alias fullnmap='nmap -p- -T4 -A -v'
+alias recon='whatweb --no-errors -v'
+
+# --- Git Shortcuts ---
+alias gs='git status'
+alias ga='git add .'
+alias gc='git commit -m'
+alias gp='git push'
+
+# --- Python HTTP Server ---
+alias serve='python3 -m http.server 8000'
+alias servepwd='python3 -m http.server 8000'
+
+# --- Fix for missing plugin files (optional fallback) ---
+[[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# --- Auto-correct minor mistakes ---
+setopt CORRECT
+
+# --- Completion Improvements ---
+autoload -Uz compinit
+compinit
+
+# --- Welcome Banner ---
+function hacker_banner() {
+  print ""
+  print -P "%F{green}╔══════════════════════════════════════════╗%f"
+  print -P "%F{cyan}║   Welcome back, Operator.                 ║%f"
+  print -P "%F{cyan}║  Mission: Capture. Exploit. Win.          ║%f"
+  print -P "%F{cyan}║ Terminal Armed: $(date +"%Y-%m-%d %H:%M:%S") ║%f"
+  print -P "%F{green}╚══════════════════════════════════════════╝%f"
+  print ""
+}
+
+# --- Random Hacker Quote ---
+function hacker_quote() {
+  quotes=(
+    "The quieter you become, the more you can hear."
+    "Security through obscurity is no security at all."
+    "Hack the planet!"
+    "Knowledge is power."
+    "First rule of hacking: Always cover your tracks."
+    "Imagination is more important than knowledge."
+    "Exploit the system, elevate your mind."
+    "There is no patch for human stupidity."
+  )
+  echo "\n💻 Quote of the Day: ${quotes[RANDOM % ${#quotes[@]}]}\n"
+}
+
+# --- Create hacking folders if they don't exist ---
+if [ ! -d "$HOME/hacking" ]; then
+  mkdir -p ~/hacking/{recon,exploits,loot,notes,scripts,web,binaries,tools}
+fi
+
+# --- IP for Prompt ---
+function grab_ip() {
+  local ip_addr
+  ip_addr=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -n1)
+  echo $ip_addr
+}
+export MYIP=$(grab_ip)
+
+# --- Show banner and quote ---
+hacker_banner
+hacker_quote
+
+# --- Custom Prompt ---
+PROMPT="%F{cyan}%n@%m %F{yellow}%~ %F{magenta}[$MYIP] %F{green}$ %f"
+export PATH="$HOME/hacking/scripts:$PATH"
+
+# Created by `pipx` on 2025-07-09 09:00:58
+export PATH="$PATH:/home/robert/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
