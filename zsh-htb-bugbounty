@@ -1,0 +1,287 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                     HTB + BUG BOUNTY OPERATOR ZSH CONFIG                     ║
+# ║                 public-safe • modular • idempotent • robust                  ║
+# ║                   Use only on systems you’re authorized to test              ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# --- Oh My Zsh (optional but supported) ---------------------------------------
+export ZSH="$HOME/.oh-my-zsh"
+export ZSH_DISABLE_COMPFIX=true
+[[ -d "$ZSH/cache" ]] || mkdir -p "$ZSH/cache"
+export ZSH_COMPDUMP="$ZSH/cache/.zcompdump-$HOST"
+
+# Fast/safe completion init
+autoload -Uz compinit && compinit -C
+
+ZSH_THEME="agnoster"
+plugins=(
+  git sudo command-not-found
+  zsh-autosuggestions zsh-syntax-highlighting zsh-completions
+  history-substring-search colored-man-pages extract z
+  golang pip python rust
+)
+# Load OMZ only if present (keeps this file portable)
+[[ -s "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
+
+# --- Shell options -------------------------------------------------------------
+setopt no_nomatch
+setopt AUTO_CD GLOB_COMPLETE NO_CASE_GLOB NUMERIC_GLOB_SORT EXTENDED_GLOB
+setopt CORRECT_ALL COMPLETE_IN_WORD ALWAYS_TO_END AUTO_MENU AUTO_LIST AUTO_PARAM_SLASH
+setopt HIST_EXPIRE_DUPS_FIRST HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE
+setopt HIST_FIND_NO_DUPS HIST_SAVE_NO_DUPS SHARE_HISTORY APPEND_HISTORY INC_APPEND_HISTORY
+setopt HIST_VERIFY BANG_HIST
+
+HISTSIZE=100000
+SAVEHIST=100000
+HISTFILE=${HISTFILE:-$HOME/.zsh_bb_history}
+
+# --- PATH (unique, predictable) -----------------------------------------------
+typeset -U path PATH
+# base
+path=(/usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin)
+# optional user/dev paths
+for d in \
+  "$HOME/bin" \
+  "$HOME/.local/bin" \
+  "$HOME/go/bin" \
+  "/usr/local/go/bin" \
+  "$HOME/tools/bin" \
+  "/opt" \
+  "/opt/*/bin"
+; do
+  for p in ${(z)d}; do [[ -d $p ]] && path+=$p; done
+done
+export PATH="${(j.:.)path}"
+
+# --- Color helpers -------------------------------------------------------------
+if [[ -t 1 ]]; then
+  RED=$'%F{1}'; GRN=$'%F{2}'; YLW=$'%F{3}'; BLU=$'%F{4}'; MAG=$'%F{5}'; CYN=$'%F{6}'; RST=$'%f'
+else
+  RED=""; GRN=""; YLW=""; BLU=""; MAG=""; CYN=""; RST=""
+fi
+
+# --- Safety: only run heavy tools if installed --------------------------------
+require() { command -v "$1" >/dev/null 2>&1 || { echo "${YLW}[!] Missing: $1${RST}" >&2; return 1; }; }
+need() { for x in "$@"; do require "$x" || return 1; done; }
+
+# --- Friendly, informative prompt ---------------------------------------------
+setopt PROMPT_SUBST
+_git_prompt() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return
+  local b; b=$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)
+  local d; d=$(git status --porcelain 2>/dev/null)
+  [[ -n $d ]] && echo " %F{red}⚡$b%f" || echo " %F{green}✓$b%f"
+}
+# IP cache
+_myip() { ip route get 1 2>/dev/null | awk '{print $7}' | head -n1 || echo 127.0.0.1; }
+export MYIP=$(_myip)
+PROMPT='%F{green}%n@%m%f %F{blue}%~%f [%F{cyan}'$MYIP'%f]$(_git_prompt)\n$ '
+RPS1='%F{yellow}[%D{%H:%M:%S}]%f'
+
+# --- Aliases (safe defaults; HTB-friendly) ------------------------------------
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --group-directories-first --icons --color=always'
+  alias ll='eza -la --group-directories-first --icons --color=always'
+  alias lt='eza -T --group-directories-first --icons --color=always'
+else
+  alias ll='ls -la --color=auto'
+  alias lt='ls -R --color=auto'
+fi
+alias cls='clear && printf "\033[3J"'
+alias please='sudo $(fc -ln -1)'
+alias update='sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y && sudo apt autoclean'
+alias reload='source ~/.zshrc && echo "${GRN}🔄 Reloaded${RST}"'
+
+# --- Environment knobs ---------------------------------------------------------
+export EDITOR=${EDITOR:-nano}
+export VISUAL=${VISUAL:-$EDITOR}
+export PAGER=${PAGER:-less}
+
+# --- Workspace bootstrap (target scaffolding) ---------------------------------
+mkbb() {
+  # mkbb <target> [dir]
+  local tgt="$1"; local root="${2:-$HOME/engagements}"
+  if [[ -z $tgt ]]; then echo "Usage: mkbb <target> [dir]"; return 1; fi
+  local ts; ts=$(date +%Y%m%d_%H%M%S)
+  local b="$root/${tgt}_${ts}"
+  mkdir -p "$b"/{recon/{nmap,httpx,wayback,subs},web/{gobuster,nikto,nuclei},notes,loot/{creds,files},screens}
+  echo "$b"
+}
+
+# --- Wordlists locator ---------------------------------------------------------
+WL_BASE() {
+  local c
+  for c in \
+    "$HOME/wordlists" \
+    "/usr/share/seclists" \
+    "/usr/share/wordlists" \
+    "/usr/share/dirb/wordlists" ; do
+    [[ -d $c ]] && { echo "$c"; return; }
+  done
+  echo "" # none
+}
+
+# --- VPN helpers (HTB/OpenVPN) ------------------------------------------------
+# Set HTB_OVPN="$HOME/htb/robert.ovpn" in ~/.zshrc.local (not in repo)
+htb-up()   { [[ -f "$HTB_OVPN" ]] || { echo "Set HTB_OVPN path in ~/.zshrc.local"; return 1; }; need sudo openvpn && sudo openvpn --config "$HTB_OVPN" --daemon; }
+htb-down() { need sudo; sudo killall openvpn 2>/dev/null || true; }
+
+# --- Recon primitives ----------------------------------------------------------
+# Subdomain enumeration (passive-first)
+subenum() {
+  # subenum <domain> [outdir]
+  local d="$1"; local out="${2:-$(pwd)}"; [[ -z $d ]] && { echo "Usage: subenum <domain> [outdir]"; return 1; }
+  local f="$out/subs_${d}.txt"; : > "$f"
+  echo "${BLU}[*] Subenum: $d -> $f${RST}"
+  { \
+    command -v subfinder >/dev/null 2>&1 && subfinder -d "$d" -silent; \
+    command -v assetfinder >/dev/null 2>&1 && assetfinder --subs-only "$d"; \
+    command -v amass >/dev/null 2>&1 && amass enum -passive -d "$d" 2>/dev/null; \
+    command -v chaos >/dev/null 2>&1 && chaos -d "$d" 2>/dev/null; \
+    command -v crtsh >/dev/null 2>&1 && crtsh "$d" 2>/dev/null; \
+    # Fallback with crt.sh via curl + jq
+    (require curl && require jq) && curl -fsS "https://crt.sh/?q=%25.$d&output=json" | jq -r '.[].name_value' | sed 's/\\*\.//' 2>/dev/null; \
+  } | sed 's/\\r//g' | tr '[:upper:]' '[:lower:]' | sort -u | grep -v '^\s*$' >> "$f"
+  echo "$f"
+}
+
+# Probe for live hosts (http/https) using httpx
+probe() {
+  # probe <subs.txt> [outdir]
+  local list="$1"; local out="${2:-$(pwd)}"; [[ -f $list ]] || { echo "Usage: probe <subs.txt> [outdir]"; return 1; }
+  need httpx || return 1
+  local f="$out/live_$(basename ${list%.*}).txt"
+  httpx -silent -status-code -title -tech-detect -json -l "$list" | tee "$f"
+  echo "$f"
+}
+
+# Wayback/Gather URLs
+gather_urls() {
+  # gather_urls <domain> [outdir]
+  local d="$1"; local out="${2:-$(pwd)}"; [[ -z $d ]] && { echo "Usage: gather_urls <domain> [outdir]"; return 1; }
+  local f="$out/urls_${d}.txt"
+  : > "$f"
+  command -v gau >/dev/null 2>&1 && gau -subs "$d" >> "$f"
+  command -v waybackurls >/dev/null 2>&1 && waybackurls "$d" >> "$f"
+  sort -u "$f" -o "$f"
+  echo "$f"
+}
+
+# Nmap profiles (respectful defaults)
+nmap_quick() { need nmap || return 1; nmap -T4 -Pn --top-ports 1000 -sC -sV "$@"; }
+nmap_full()  { need nmap || return 1; nmap -T4 -Pn -p- -sC -sV "$@"; }
+
+# Directory brute (uses common wordlists)
+dirhunt() {
+  # dirhunt <url> [outdir]
+  local url="$1"; local out="${2:-$(pwd)}"; [[ -z $url ]] && { echo "Usage: dirhunt <url> [outdir]"; return 1; }
+  local base; base=$(WL_BASE)
+  local wl="$base/dirbuster/directory-list-2.3-medium.txt"
+  [[ -f $wl ]] || wl="$base/raft-medium-words.txt"
+  require ffuf || require gobuster || { echo "Install ffuf or gobuster"; return 1; }
+  local f="$out/dirs_$(echo "$url" | tr -d ':/')_$(date +%H%M%S).txt"
+  if command -v ffuf >/dev/null 2>&1; then
+    ffuf -u "$url/FUZZ" -w "$wl" -fc 404 -t 50 | tee "$f"
+  else
+    gobuster dir -u "$url" -w "$wl" -t 50 -x php,txt,js,html,json | tee "$f"
+  fi
+  echo "$f"
+}
+
+# Vulnerability templating with nuclei (safe, rate-limited)
+scan_nuclei() {
+  # scan_nuclei <live.txt or URL> [outdir]
+  need nuclei || return 1
+  local src="$1"; local out="${2:-$(pwd)}"; [[ -z $src ]] && { echo "Usage: scan_nuclei <targets> [outdir]"; return 1; }
+  local f="$out/nuclei_$(date +%Y%m%d_%H%M%S).txt"
+  if [[ -f $src ]]; then
+    nuclei -l "$src" -rl 150 -c 50 -severity low,medium,high,critical -o "$f"
+  else
+    echo "$src" | nuclei -rl 150 -c 50 -severity low,medium,high,critical -o "$f"
+  fi
+  echo "$f"
+}
+
+# Param mining (XSS/SQLi discovery hints)
+param_miner() {
+  # param_miner <urls.txt> [outdir]
+  local u="$1"; local out="${2:-$(pwd)}"; [[ -f $u ]] || { echo "Usage: param_miner <urls.txt> [outdir]"; return 1; }
+  local f="$out/params_${${u:t}%.*}.txt"
+  if command -v arjun >/dev/null 2>&1; then
+    arjun -i "$u" -o "$f" 2>/dev/null
+  else
+    echo "${YLW}[!] arjun not installed. Consider installing for parameter discovery.${RST}" >&2
+    touch "$f"
+  fi
+  echo "$f"
+}
+
+# Basic HTTP helpers (debug-friendly)
+hget() { require curl || return 1; curl -iSL "$@"; }
+hpost() { require curl || return 1; local url="$1"; shift; curl -iSL -X POST "$url" -d "$@"; }
+json() { require jq || return 1; jq -C .; }
+
+# --- Orchestrated flows --------------------------------------------------------
+# bb-recon: end-to-end passive-first recon pipeline
+bb-recon() {
+  # bb-recon <domain>
+  local d="$1"; [[ -z $d ]] && { echo "Usage: bb-recon <domain>"; return 1; }
+  local root=$(mkbb "$d") || return 1
+  echo "${CYN}[*] Workspace: $root${RST}"
+  local subs=$(subenum "$d" "$root/recon/subs")
+  local live=$(probe "$subs" "$root/recon/httpx")
+  local urls=$(gather_urls "$d" "$root/recon/wayback")
+  echo "${GRN}[+] Subdomains: $subs${RST}"
+  echo "${GRN}[+] Live: $live${RST}"
+  echo "${GRN}[+] URLs: $urls${RST}"
+  echo "${BLU}[*] Optional: scan_nuclei $live $root/web/nuclei${RST}"
+}
+
+# bb-web: targeted web enum for a single URL
+bb-web() {
+  # bb-web <url>
+  local u="$1"; [[ -z $u ]] && { echo "Usage: bb-web <url>"; return 1; }
+  local dir=$(mkbb $(echo "$u" | sed 's#https\?://##; s#/.*##'))
+  echo "${CYN}[*] Workspace: $dir${RST}"
+  require whatweb && whatweb -a 3 -v "$u" | tee "$dir/web/tech.txt"
+  dirhunt "$u" "$dir/web/gobuster"
+  scan_nuclei "$u" "$dir/web/nuclei"
+  echo "${GRN}[+] Done. See: $dir${RST}"
+}
+
+# bb-nmap: quick or full against a host or CIDR
+bb-nmap() {
+  # bb-nmap <target> [full]
+  local t="$1"; local mode="$2"; [[ -z $t ]] && { echo "Usage: bb-nmap <target> [full]"; return 1; }
+  local dir=$(mkbb $(echo "$t" | tr '/' '_'))
+  if [[ $mode == full ]]; then
+    nmap_full "$t" | tee "$dir/recon/nmap/full.txt"
+  else
+    nmap_quick "$t" | tee "$dir/recon/nmap/quick.txt"
+  fi
+  echo "${GRN}[+] Output in $dir/recon/nmap${RST}"
+}
+
+# --- Docker helpers (common infra) --------------------------------------------
+alias dps='docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dpsa='docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias di='docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"'
+alias dexec='docker exec -it'
+
+# --- Quality-of-life -----------------------------------------------------------
+watchfile() { # watchfile <path>
+  local f="$1"; [[ -f $f ]] || { echo "Usage: watchfile <file>"; return 1; }
+  while true; do clear; date; tail -n 40 "$f"; sleep 1; done
+}
+
+# --- Private, machine-specific overrides --------------------------------------
+# Put secrets, tokens, and local-only settings here (never commit this file):
+#   touch ~/.zshrc.local
+#   echo 'export HTB_OVPN="$HOME/htb/robert.ovpn"' >> ~/.zshrc.local
+[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+
+# --- First-run banner ----------------------------------------------------------
+if [[ -z $ZSH_RC_ONCE ]]; then
+  export ZSH_RC_ONCE=1
+  echo "${GRN}HTB + Bug Bounty shell armed. Stay ethical. Happy hunting.${RST}"
+fi
